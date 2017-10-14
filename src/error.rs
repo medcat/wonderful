@@ -2,9 +2,10 @@ use std::error::Error as TraitError;
 use std::fmt::{Display, Formatter, Error as FmtError};
 use std::num::ParseIntError;
 use std::io::Error as IoError;
-use postgres::Error as PgError;
 use toml::de::Error as TomlDeError;
+use toml::ser::Error as TomlSerError;
 use discord::Error as DiscordError;
+use redis::RedisError;
 use std::convert::From;
 
 #[derive(Debug)]
@@ -27,4 +28,4 @@ macro_rules! error_from {
     );
 }
 
-error_from!(PgError, ParseIntError, IoError, TomlDeError, DiscordError);
+error_from!(ParseIntError, IoError, TomlDeError, TomlSerError, DiscordError, RedisError);

@@ -7,9 +7,13 @@ authors = ["Jeremy Rodi <me@medcat.me>"]
 serde = "1.0"
 serde_derive = "1.0"
 toml = "0.4"
-discord = "0.8"
-postgres = "0.15"
+redis = "0.8"
 clap = "2.26"
 log = "0.3"
 simplelog = "^0.4.2"
 bitflags = "1.0"
+shellwords = "0.1"
+# until the discord crate is updated.
+# discord = "0.8"
+discord = { git = "https://github.com/SpaceManiac/discord-rs" }
+rand = "0.3"

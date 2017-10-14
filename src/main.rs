@@ -4,12 +4,14 @@ extern crate serde_derive;
 extern crate log;
 #[macro_use]
 extern crate bitflags;
+extern crate shellwords;
 extern crate simplelog;
 extern crate serde;
 extern crate toml;
 extern crate clap;
-extern crate postgres;
+extern crate redis;
 extern crate discord;
+extern crate rand;
 
 mod configuration;
 mod error;
@@ -61,13 +63,12 @@ fn handle_error(e: Error) -> ! {
 #[inline]
 fn init_store(config: &Configuration) {
     trace!("Creating initial datastore connection...");
-    let store = Store::from(&config.store).unwrap_or_else(|e| handle_error(e));
-    trace!("Performing datastore migration check...");
-    self::store::migrate(&store).unwrap_or_else(|e| handle_error(e));
+    Store::from(&config.store).unwrap_or_else(|e| handle_error(e));
 }
 
 #[inline]
 fn init_config(name: &str) -> Configuration {
+    configuration::create_unless_exists(name).unwrap_or_else(|e| handle_error(e));
     Configuration::from(name).unwrap_or_else(|e| handle_error(e))
 }
 

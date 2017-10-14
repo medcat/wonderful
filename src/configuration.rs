@@ -1,7 +1,5 @@
-use std::fs::File;
-use std::io::BufReader;
-use std::io::Read;
-use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, Read, Write, ErrorKind as IoErrorKind};
 use std::ops::Deref;
 use toml;
 use super::Error;
@@ -28,52 +26,19 @@ impl Default for Sharding {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(default)]
-pub struct StoreLocation {
-    #[serde(rename = "database")]
-    pub base: Option<String>,
-    pub host: String,
-    pub user: Option<String>,
-    #[serde(rename = "password")]
-    pub pass: Option<String>,
-    pub port: Option<u16>,
-    pub options: HashMap<String, String>
-}
-
-impl Default for StoreLocation {
-    fn default() -> StoreLocation {
-        StoreLocation {
-            base: None,
-            host: String::from("localhost"),
-            user: None,
-            pass: None,
-            port: None,
-            options: HashMap::new()
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum Store {
-    Uri(String),
-    Expanded(StoreLocation)
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename = "bot", default)]
 pub struct Bot {
     /// The owners of the bot.  This is only used for verifying debug commands and the like;
     /// this does not allow owners access to commands outside of debug/server commands.
     pub owners: Vec<i64>,
-    /// Handling sharding.
-    pub shards: Sharding,
     /// The default command prefix.
     pub prefix: String,
     /// The uri to the redis server.
-    pub store: Store,
+    pub store: String,
     /// The bot token.
-    pub token: String
+    pub token: String,
+    /// Handling sharding.
+    pub shards: Sharding,
 }
 
 impl Default for Bot {
@@ -83,9 +48,17 @@ impl Default for Bot {
             shards: Sharding::default(),
             prefix: String::from("!"),
             token: String::new(),
-            store: Store::Uri(String::from("postgres://wonder@localhost/wonder"))
+            store: String::from("redis://wonder@localhost/0")
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(default)]
+struct Config { bot: Bot }
+
+impl Default for Config {
+    fn default() -> Config { Config { bot: Bot::default() } }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -101,12 +74,27 @@ impl Configuration {
         trace!("Reading configuration file...");
         reader.read_to_string(&mut contents)?;
         trace!("Loading configuration...");
-        let bot = toml::from_str::<Bot>(&contents)?;
-        Ok(Configuration(name, bot))
+        let config = toml::from_str::<Config>(&contents)?;
+        Ok(Configuration(name, config.bot))
     }
 }
 
 impl Deref for Configuration {
     type Target = Bot;
     fn deref(&self) -> &Bot { &self.1 }
+}
+
+pub fn create_unless_exists(name: &str) -> Result<(), Error> {
+    let open = OpenOptions::new().create_new(true).write(true).open(name);
+    match open {
+        Ok(mut f) => {
+            let dumped =
+                toml::to_string::<Config>(&Config::default())
+                .map_err(|e| -> Error { e.into() })?;
+            f.write_all(dumped.as_bytes())?;
+            Ok(())
+        },
+        Err(ref e) if e.kind() == IoErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(e.into())
+    }
 }

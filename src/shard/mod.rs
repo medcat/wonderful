@@ -1,13 +1,16 @@
 mod command;
 mod commands;
 mod event;
+mod util;
 
-pub use self::command::CommandSet;
+use self::command::{Command, Act, CommandSet};
 pub use self::commands::init as commands;
 
 use super::{Configuration, Error};
 use super::store::Store;
 use discord::Discord;
+
+pub const ERROR_COLOR: u64 = 0xff4013;
 
 pub struct Shard {
     index: u8,
@@ -35,8 +38,12 @@ impl Shard {
     }
 
     pub fn call(self) {
+        trace!("Building context...");
         let context = self.context().unwrap_or_else(|e| ::handle_error(e));
-        let conn = context.discord.connect().unwrap_or_else(|e| ::handle_error(e.into())).0;
+        trace!("Connecting via shards...");
+        let conn = context.discord.connect_sharded(self.index, self.configuration.shards.total)
+            .unwrap_or_else(|e| ::handle_error(e.into())).0;
+        trace!("Beginning event loop...");
         event::watch(conn, context).unwrap_or_else(|e| ::handle_error(e));
     }
 }
