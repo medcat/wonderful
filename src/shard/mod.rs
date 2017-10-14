@@ -1,32 +1,33 @@
-mod command;
-mod commands;
-mod event;
+#[macro_use]
+mod plug;
+mod plugs;
 mod util;
 
-use self::command::{Command, Act, CommandSet};
-pub use self::commands::init as commands;
+pub use self::plug::*;
+pub use self::plugs::init;
 
 use super::{Configuration, Error};
 use super::store::Store;
-use discord::Discord;
+use discord::{Discord, Connection};
 
 pub const ERROR_COLOR: u64 = 0xff4013;
 
 pub struct Shard {
     index: u8,
     configuration: Configuration,
-    commands: CommandSet
+    plugs: PlugSet
 }
 
 pub struct Context<'a> {
     shard: &'a Shard,
     discord: Discord,
-    store: Store
+    connection: Connection,
+    store: Store,
 }
 
 impl Shard {
-    pub fn new(index: u8, configuration: Configuration, commands: CommandSet) -> Shard {
-        Shard { index, configuration, commands }
+    pub fn new(index: u8, configuration: Configuration, plugs: PlugSet) -> Shard {
+        Shard { index, configuration, plugs }
     }
 
     fn store(&self) -> Result<Store, Error> { Store::from(&self.configuration.store) }
@@ -34,16 +35,30 @@ impl Shard {
         Discord::from_bot_token(&self.configuration.token).map_err(|e| e.into())
     }
     fn context(&self) -> Result<Context, Error> {
-        Ok(Context { shard: &self, discord: self.discord()?, store: self.store()? })
+        let discord = self.discord()?;
+        let store = self.store()?;
+        let connection = discord.connect_sharded(self.index, self.configuration.shards.total)?.0;
+        Ok(Context { shard: &self, discord, store, connection })
     }
 
     pub fn call(self) {
         trace!("Building context...");
         let context = self.context().unwrap_or_else(|e| ::handle_error(e));
-        trace!("Connecting via shards...");
-        let conn = context.discord.connect_sharded(self.index, self.configuration.shards.total)
-            .unwrap_or_else(|e| ::handle_error(e.into())).0;
         trace!("Beginning event loop...");
-        event::watch(conn, context).unwrap_or_else(|e| ::handle_error(e));
+        watch(context).unwrap_or_else(|e| ::handle_error(e));
     }
+}
+
+fn watch(mut context: Context) -> Result<(), Error> {
+    trace!("Setting the presence...");
+
+    context.shard.plugs.trigger_start(&mut context)?;
+
+    loop {
+        trace!("Polling for an event...");
+        let event = context.connection.recv_event()?;
+        context.shard.plugs.trigger_event(&event, &mut context)?;
+    }
+
+    // context.shard.plugs.trigger_stop(&mut context)
 }

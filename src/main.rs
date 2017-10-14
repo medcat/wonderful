@@ -11,6 +11,7 @@ extern crate toml;
 extern crate clap;
 extern crate redis;
 extern crate discord;
+extern crate hyper;
 extern crate rand;
 
 mod configuration;
@@ -76,7 +77,7 @@ fn main() {
     let matches = init_app().get_matches();
     init_logging(matches.occurrences_of("v"));
     let config = init_config(matches.value_of("config").unwrap_or("config.toml"));
-    let commands = shard::commands();
+    let commands = shard::init();
     init_store(&config);
 
     (0..config.shards.create).into_iter()
