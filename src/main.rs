@@ -3,7 +3,7 @@ extern crate serde_derive;
 #[macro_use]
 extern crate log;
 #[macro_use]
-extern crate bitflags;
+extern crate lazy_static;
 extern crate shellwords;
 extern crate simplelog;
 extern crate serde;
@@ -13,6 +13,7 @@ extern crate redis;
 extern crate discord;
 extern crate hyper;
 extern crate rand;
+extern crate regex;
 
 mod configuration;
 mod error;
@@ -37,6 +38,8 @@ fn init_app<'a>() -> Application<'a, 'a> {
         .takes_value(true));
     let app = app.arg(Argument::with_name("v")
         .short("v").multiple(true).help("sets level of verbosity"));
+    let app = app.arg(Argument::with_name("s")
+        .short("s").long("suggest").help("suggests sharding configuration"));
     app
 }
 
@@ -57,7 +60,7 @@ fn handle_error(e: Error) -> ! {
     error!("Could not initalize the server!  There may have been many reasons for this.");
     error!("Use the -v option to get more information.  The error message is:");
     error!("{}", e.description());
-    error!("{:?}", e.cause());
+    error!("{:?}", e);
     panic!("exiting");
 }
 
@@ -73,10 +76,23 @@ fn init_config(name: &str) -> Configuration {
     Configuration::from(name).unwrap_or_else(|e| handle_error(e))
 }
 
+fn handle_suggest(config: &Configuration) {
+    trace!("loading discord...");
+    let discord = discord::Discord::from_bot_token(&config.token)
+        .unwrap_or_else(|e| handle_error(e.into()));
+    trace!("retrieving suggested sharding...");
+    let suggest = discord.suggested_shard_count()
+        .unwrap_or_else(|e| handle_error(e.into()));
+    println!("total = {}", suggest);
+}
+
 fn main() {
     let matches = init_app().get_matches();
     init_logging(matches.occurrences_of("v"));
     let config = init_config(matches.value_of("config").unwrap_or("config.toml"));
+
+    if matches.is_present("s") { handle_suggest(&config); return; }
+
     let commands = shard::init();
     init_store(&config);
 
@@ -84,6 +100,6 @@ fn main() {
         .map(|i| shard::Shard::new(i, config.clone(), commands.clone()))
         .map(|s| std::thread::spawn(move || s.call()))
         .collect::<Vec<_>>().into_iter()
-        .map(|t| t.join().unwrap())
+        .map(|t| t.join())
         .count();
 }

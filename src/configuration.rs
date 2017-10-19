@@ -28,6 +28,8 @@ impl Default for Sharding {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename = "bot", default)]
 pub struct Bot {
+    /// The name of the bot.
+    pub name: String,
     /// The owners of the bot.  This is only used for verifying debug commands and the like;
     /// this does not allow owners access to commands outside of debug/server commands.
     pub owners: Vec<i64>,
@@ -44,6 +46,7 @@ pub struct Bot {
 impl Default for Bot {
     fn default() -> Bot {
         Bot {
+            name: String::from("Wonderful Bot"),
             owners: vec![],
             shards: Sharding::default(),
             prefix: String::from("!"),

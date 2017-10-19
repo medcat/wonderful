@@ -1,7 +1,9 @@
 #![allow(unused_variables)]
 
+use std::error::Error as TraitError;
 use std::sync::Arc;
 use std::ops::{Deref, DerefMut};
+use std::fmt::Debug;
 use discord::model::{Event, Message};
 use super::{Context, Error};
 use shellwords;
@@ -23,10 +25,11 @@ pub struct Command<'a> {
 
 fn build_arguments(s: &str) -> Vec<String> {
     shellwords::split(&s).unwrap_or_else(|_|
-        s.split(char::is_whitespace).map(|s| s.to_owned()).collect::<Vec<_>>())
+        s.split(char::is_whitespace).take_while(|s| s.len() == 0).
+            map(|s| s.to_owned()).collect::<Vec<_>>())
 }
 
-pub trait Plug {
+pub trait Plug: Debug {
     fn handle_start(&self, context: &mut Context) -> PlugResult { Ok(PlugStatus::Continue) }
     fn handle_stop(&self, context: &mut Context) -> PlugResult { Ok(PlugStatus::Continue) }
     fn matches_name(&self, &str) -> bool { false }
@@ -47,7 +50,7 @@ pub trait Plug {
         let name = message.content.chars().skip(prefix)
             .take_while(|c| !char::is_whitespace(*c)).collect::<String>();
         if !self.matches_name(&name) { return Ok(PlugStatus::Continue); }
-        let arguments = build_arguments(&message.content[name.len()..]);
+        let arguments = build_arguments(&message.content[(name.len() + 1)..]);
         let arguments = arguments.iter().map(|s| &s[..]).collect::<Vec<_>>();
         let command = Command { name: &name, arguments: &arguments[..], message };
         self.handle_command(&command, context)
@@ -67,25 +70,45 @@ impl PlugSet {
     }
 
     pub fn trigger_start(&self, context: &mut Context) -> Result<(), Error> {
-        trace!("Trigger start!");
-        self.iter().fold(Ok(PlugStatus::Continue), |last, ref plug| {
-            match last { Ok(PlugStatus::Continue) => plug.handle_start(context), _ => last }
-        }).map(|_| ())
+        trace!("triggering start...");
+        for plug in self.iter() {
+            trace!("- Plug {:?}", plug);
+            match plug.handle_start(context) {
+                Ok(PlugStatus::Continue) => { trace!("Continue."); }
+                Ok(PlugStatus::Stop) => { trace!("Break."); break; }
+                Err(err) => return Err(err.into())
+            }
+        }
+
+        trace!("start trigger done.");
+
+        Ok(())
     }
 
     pub fn trigger_event(&self, event: &Event, context: &mut Context) -> Result<(), Error> {
-        trace!("Trigger event: {:?}", event);
-        self.iter().fold(Ok(PlugStatus::Continue), |last, ref plug| {
-            trace!("Result: {:?}", last);
-            match last { Ok(PlugStatus::Continue) => plug.handle_event(event, context), _ => last }
-        }).map(|_| ())
-    }
+        debug!("triggering event...");
+        trace!("event: {:?}", event);
 
-    // pub fn trigger_stop(&self, context: &mut Context) -> Result<(), Error> {
-    //     self.iter().fold(Ok(PlugStatus::Continue), |last, ref plug| {
-    //         match last { Ok(PlugStatus::Continue) => plug.handle_stop(context), _ => last }
-    //     }).map(|_| ())
-    // }
+        for plug in self.iter() {
+            match plug.handle_event(event, context) {
+                Ok(PlugStatus::Continue) => { trace!("{:?}: Continue.", plug); }
+                Ok(PlugStatus::Stop) => { trace!("{:?}: Break.", plug); break; }
+                Err(err) => {
+                    warn!("{:?}: Error!", plug);
+                    if err.is_recoverable() {
+                        warn!("Error is marked as recoverable, and so will be treated as a Continue.");
+                        warn!("Error: {}, {:?}", err.description(), err);
+                    } else {
+                        error!("Error found in plug {:?}!", plug);
+                        return Err(err.into())
+                    }
+                }
+            }
+        }
+
+        debug!("event trigger done.");
+        Ok(())
+    }
 }
 
 impl Default for PlugSet {
@@ -102,9 +125,23 @@ impl DerefMut for PlugSet {
 }
 
 macro_rules! plug {
+    () => ();
+
     ($n:ident => $f:tt) => (
         #[derive(Debug, Copy, Clone, PartialEq, Eq)]
         struct $n;
         impl Plug for $n $f
     );
+
+    ($n:ident => $f:tt, $($ni:ident => $fi:tt),+) => (
+        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+        struct $n;
+        impl Plug for $n $f
+
+        $(
+            #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+            struct $ni;
+            impl Plug for $ni $fi
+        )+
+    )
 }

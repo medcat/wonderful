@@ -8,21 +8,20 @@ pub use self::plugs::init;
 
 use super::{Configuration, Error};
 use super::store::Store;
-use discord::{Discord, Connection};
-
-pub const ERROR_COLOR: u64 = 0xff4013;
+use discord::{Discord, Connection, State};
 
 pub struct Shard {
-    index: u8,
-    configuration: Configuration,
+    pub index: u8,
+    pub configuration: Configuration,
     plugs: PlugSet
 }
 
 pub struct Context<'a> {
-    shard: &'a Shard,
-    discord: Discord,
-    connection: Connection,
-    store: Store,
+    pub shard: &'a Shard,
+    pub discord: Discord,
+    pub connection: Connection,
+    pub store: Store,
+    pub state: State,
 }
 
 impl Shard {
@@ -37,8 +36,9 @@ impl Shard {
     fn context(&self) -> Result<Context, Error> {
         let discord = self.discord()?;
         let store = self.store()?;
-        let connection = discord.connect_sharded(self.index, self.configuration.shards.total)?.0;
-        Ok(Context { shard: &self, discord, store, connection })
+        let (connection, ready) = discord.connect_sharded(self.index, self.configuration.shards.total)?;
+        let state = State::new(ready);
+        Ok(Context { shard: &self, discord, connection, store, state })
     }
 
     pub fn call(self) {
@@ -50,13 +50,12 @@ impl Shard {
 }
 
 fn watch(mut context: Context) -> Result<(), Error> {
-    trace!("Setting the presence...");
-
     context.shard.plugs.trigger_start(&mut context)?;
 
     loop {
-        trace!("Polling for an event...");
+        debug!("Polling for an event...");
         let event = context.connection.recv_event()?;
+        context.state.update(&event);
         context.shard.plugs.trigger_event(&event, &mut context)?;
     }
 
